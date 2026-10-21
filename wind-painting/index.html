@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>風吹倒影</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1c1b18; overflow: hidden; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+  #error { position: fixed; top: 16px; left: 16px; padding: 8px 12px; background: #5a1e1e; color: #fff; font: 13px system-ui, sans-serif; border-radius: 6px; }
+  #panel {
+    position: fixed; top: 16px; right: 16px; width: 300px; max-width: calc(100vw - 32px);
+    background: rgba(24, 22, 19, 0.72); color: #ece5d6; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 240, 210, 0.12); border-radius: 10px;
+    font: 12px/1.4 system-ui, "Microsoft JhengHei", sans-serif; user-select: none;
+  }
+  #panel header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+  #panel header .title { flex: 1; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #panel button, #panel select {
+    background: rgba(255, 240, 210, 0.1); color: inherit; border: 1px solid rgba(255, 240, 210, 0.18);
+    border-radius: 6px; padding: 3px 8px; font: inherit; cursor: pointer;
+  }
+  #panel .body { padding: 2px 10px 10px; }
+  #panel.collapsed .body, #panel.collapsed .actions, #panel.collapsed select { display: none; }
+  #panel .row { display: grid; grid-template-columns: 112px 1fr 34px; align-items: center; gap: 6px; padding: 3px 0; }
+  #panel .row input { width: 100%; accent-color: #d9b878; }
+  #panel .val { text-align: right; font-variant-numeric: tabular-nums; opacity: 0.75; }
+  #panel .actions { display: flex; gap: 6px; padding: 0 10px 10px; }
+  #panel .hint { padding: 0 10px 10px; opacity: 0.55; }
+  #panel.collapsed .hint { display: none; }
+  #panel .group { margin: 8px 0 2px; font-size: 11px; letter-spacing: 0.08em; color: #d9b878; opacity: 0.85; }
+  #panel .group:first-child { margin-top: 0; }
+  #panel .meter { margin-left: auto; align-self: center; opacity: 0.7; font-variant-numeric: tabular-nums; }
+  #panel select { margin: 0 10px 8px; width: calc(100% - 20px); }
+  #panel { max-height: calc(100vh - 92px); overflow-y: auto; }
+  #panel .row .name::before { content: ''; display: inline-block; width: 1.1em; }
+  #panel .row.keyed .name::before { content: '◇'; color: #d9b878; }
+  #panel .row.onkey .name::before { content: '◆'; color: #d9b878; }
+  #panel .row.dirty .name::before { content: '◆'; color: #e0785c; }
+  #panel .row.dirty input { accent-color: #e0785c; }
+
+  /* 時間軸（timeline.js） */
+  #timeline {
+    position: fixed; left: 16px; right: 16px; bottom: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 8px 10px; background: rgba(24, 22, 19, 0.72); color: #ece5d6; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 240, 210, 0.12); border-radius: 10px;
+    font: 12px/1.4 system-ui, "Microsoft JhengHei", sans-serif; user-select: none;
+  }
+  #timeline button, #timeline select {
+    background: rgba(255, 240, 210, 0.1); color: inherit; border: 1px solid rgba(255, 240, 210, 0.18);
+    border-radius: 6px; padding: 3px 8px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  #timeline button:disabled { opacity: 0.35; cursor: default; }
+  #timeline button.setkey { border-color: rgba(217, 184, 120, 0.55); color: #f0d79e; }
+  #timeline button.setkey.pending { background: rgba(224, 120, 92, 0.3); border-color: #e0785c; color: #fff; }
+  #timeline .time { min-width: 108px; font-variant-numeric: tabular-nums; cursor: pointer; opacity: 0.85; }
+  #timeline .bar { position: relative; flex: 1 1 240px; height: 26px; cursor: pointer; touch-action: none; }
+  #timeline .bar::before { content: ''; position: absolute; left: 0; right: 0; top: 12px; height: 2px; background: rgba(255, 240, 210, 0.25); border-radius: 1px; }
+  #timeline .marks i { position: absolute; top: 8px; width: 8px; height: 8px; margin-left: -4px; background: #d9b878; transform: rotate(45deg); }
+  #timeline .marks b { position: absolute; top: 15px; width: 0; height: 0; margin-left: -4px; border: 4px solid transparent; border-bottom: 7px solid #8fc6e8; border-top: 0; }
+  #timeline .head { position: absolute; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; background: #fff; pointer-events: none; }
+  #timeline.onkey .head { background: #f0d79e; box-shadow: 0 0 6px #d9b878; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="error" hidden></div>
+<div id="panel">
+  <header>
+    <span class="title" id="scene-title"></span>
+    <button id="toggle" type="button" title="收合（H）">≡</button>
+  </header>
+  <select id="scene-select" hidden></select>
+  <div class="body"></div>
+  <div class="actions">
+    <button id="reset" type="button">重設</button>
+    <button id="copy" type="button">複製參數</button>
+    <span class="meter" id="meter"></span>
+  </div>
+  <div class="hint">點擊畫面：一陣強風（可連續點擊疊加）。右下數字是當下實際風力。按 H 收合面板。<br>時間軸：調滑桿後按「設 key」（K）記在目前時間；◇ = 這個參數有 key，紅 = 調過還沒設 key（拖時間軸或播放會放棄）。空白鍵播放。</div>
+</div>
+<div id="timeline"></div>
+<script src="js/scenes.js"></script>
+<script src="js/rhythm-lotus.js"></script>
+<script src="js/curve-audio01.js"></script>
+<script src="js/wind.js"></script>
+<script src="js/timeline.js"></script>
+</body>
+</html>
